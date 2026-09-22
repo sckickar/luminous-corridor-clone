@@ -2,6 +2,105 @@ var W = 192, H = 192, HUDW = 16, HUDH = 12;
 var CW = W + HUDW;          
 var CH = H + HUDH;
 
+var SOUND_DIR = 'soundforlum/';
+      var soundEnabled = true;
+      try { soundEnabled = window.localStorage.getItem('lumcorr.sound') !== 'off'; } catch (e) {}
+
+
+var SFX_DEFS = {
+  bolt:      { file: 'shooting/', count: 6, volume: 0.5 },
+  crystal:   { file: 'crystal/',  count: 5 },
+  die:       { file: 'die/',      count: 3 },
+  impact:    { file: 'explode/',  count: 5 },
+  starfish:  { file: 'starfish/', count: 5 },
+  crying:    { file: 'crying/',   count: 4 },
+  cutscene:  { file: 'cutscene' },
+  playerdie: { file: 'playerdie' },
+  enemyfire: { file: 'enemyfire' },
+  eating:    { file: 'eating' },
+  fluttery:  { file: 'fluttery' }
+};
+var MUSIC_DEFS = { intro: 'intro.mp3', level1: 'level1.mp3', level2: 'level2.mp3', cut: 'cut.mp3', end: 'end.mp3' };
+var sfx = {}, music = {}, sfxLast = {};
+var currentMusic = null, wantedMusic = null;
+
+function markBroken(e) {
+  var a = (e && e.target) ? e.target : this;
+  if (a) a.broken = true;
+}
+
+function safePlay(a) {
+  if (!a || a.broken) return;
+  try {
+    var p = a.play();
+    if (p && p.catch) p.catch(function () {});
+  } catch (err) {}
+}
+
+function loadSounds() {
+  var name, d, n, i, a;
+  for (name in SFX_DEFS) {
+    d = SFX_DEFS[name]; n = d.count || 1; sfx[name] = [];
+    for (i = 0; i < n; i++) {
+      a = new Audio(SOUND_DIR + d.file + (d.count ? i : '') + '.wav');
+      a.preload = 'auto';
+      a.onerror = markBroken;
+      a.baseVolume = d.volume || 1;
+      sfx[name].push(a);
+    }
+  }
+  for (name in MUSIC_DEFS) {
+    a = new Audio(SOUND_DIR + MUSIC_DEFS[name]);
+    a.loop = true; a.preload = 'auto'; a.onerror = markBroken;
+    music[name] = a;
+  }
+}
+
+function playSfx(name) {
+  if (!soundEnabled || attractMode) return;
+  var list = sfx[name];
+  if (!list) return;
+  if (sfxLast[name] !== undefined && clock - sfxLast[name] < 3) return;
+  sfxLast[name] = clock;
+  var base = list[randomInt(list.length)];
+  if (base.broken) return;
+  var s = base.cloneNode();                          
+  s.volume = base.baseVolume;
+  safePlay(s);
+}
+
+function playMusic(name) {
+  wantedMusic = name;
+  var track = music[name] || null;
+  if (!soundEnabled) return;
+  if (track && track === currentMusic && !track.paused) return;
+  if (currentMusic && currentMusic !== track) currentMusic.pause();
+  currentMusic = track;
+  if (!track || track.broken) return;
+  track.currentTime = 0;
+  safePlay(track);
+}
+
+function levelTrack() {
+  var areas = 0;
+  for (var i = 1; i <= wave && i < SETTING_ORDER.length; i++) if (SETTING_ORDER[i] === 'intermission') areas++;
+  return areas % 2 === 0 ? 'level1' : 'level2';
+}
+
+function toggleSound() {
+  soundEnabled = !soundEnabled;
+  try { window.localStorage.setItem('lumcorr.sound', soundEnabled ? 'on' : 'off'); } catch (e) {}
+  if (!soundEnabled) { if (currentMusic) currentMusic.pause(); }
+  else if (wantedMusic) { currentMusic = null; playMusic(wantedMusic); }
+}
+
+function resumeAudio() {
+  if (soundEnabled && currentMusic && currentMusic.paused && !currentMusic.broken) safePlay(currentMusic);
+}
+window.addEventListener('keydown', resumeAudio);
+window.addEventListener('pointerdown', resumeAudio);
+window.addEventListener('touchstart', resumeAudio);
+
 function randomInt(max) { return Math.floor(Math.random() * max); }
 function randomIntIn(a, b) { return Math.floor(a + Math.random() * (b - a + 1)); }
 function randomIn(a, b) { return a + Math.random() * (b - a); }
@@ -58,6 +157,24 @@ var RULES = {
 
 var EFFECT_RULE = [[0,3,3,1,2,3,3,3,2],[0,0,0,1,2,0,0,0,2],[0,0,1,3,3,3,2,1,1],[0,0,3,0,3,0,3,0,2],[0,1,2,2,1,0,2,2,0],[1,3,1,3,3,2,1,2,2],[1,2,1,1,1,1,2,2,0],[3,1,0,0,1,3,2,3,0],[2,1,3,1,3,3,0,1,1]];
 
+var CHAR0 = 'PSI GUY';
+
+var ILLUSTRATED_LISTS = [
+  { title: 'bestiary', items: [
+    [8, 'SKELETOID', 'sometimes feels lost'], [12, 'REPLETE', 'fiery disposition'],
+    [16, 'SHY EYE', 'a real wallflower'], [32, 'STARFISH', 'makes starfish'],
+    [36, 'lowercase starfish', 'attacks in groups'], [42, 'SOWER', 'sows new cells'],
+    [44, 'CHEW CHEW', 'chews you']] },
+  { title: 'bestiary', items: [
+    [80, 'SHUTTLE', 'brings presents'], [38, 'SEEKER', 'explodes when shot'],
+    [66, 'TURRET', 'territorial'], [18, 'EATER', 'insatiable appetite'],
+    [20, 'THE BLOB', 'lays eggs'], [22, 'EGG', 'what will it become?']] },
+  { title: 'the good stuff', items: [
+    [24, 'CRYSTAL', 'resonant psi matrix. the CRYSTALS were stolen, and must be reclaimed if there is ever to be order in the land.'],
+    [78, CHAR0, 'has powerful psionic powers and a very handsome moustache.'],
+    [6, 'EXTRA LIFE', 'soul transference device']] }
+];
+
 var SETTINGS = {
   'wastelands':   { rule: 'wastelands', empty: 0, damage: 2, boltRadius: 3,  sowerRange: 10, minCells: 5000,  maxCells: 7000,  clearing: 68 },
   'coral forest': { rule: 'coral',      empty: 1, damage: 2, boltRadius: 2,  sowerRange: 16, minCells: 3000,  maxCells: 3500,  clearing: 68 },
@@ -73,14 +190,12 @@ var SETTINGS = {
   'intermission': { rule: 'castle',     empty: 2, damage: 1, boltRadius: 6,  sowerRange: 6,  minCells: 750,   maxCells: 1000,  clearing: 96 }
 };
 
-var CHAR0 = 'PSI GUY';
-
 var SETTING_ORDER = ['attract','ready?','wastelands','wastelands','wastelands','intermission',
   'iron castle','iron castle','iron castle','intermission','coral forest','coral forest',
   'coral forest','intermission','something','something','something','intermission',
   'intermission','castle','walls'];
 
-var WAVE_NAME = ['attract mode','reclaim the psi crystals','the coral forest','the coral forest',
+var WAVE_NAME = ['attract mode','collect the psi crystals. safety not guaranteed','the coral forest','the coral forest',
   'the coral forest', CHAR0 + ' trains hard to be as heroic as possible','psi storm',
   'they have all been cocooned! but what will they become?','the castle','the burning lands',
   'the luminous corridor'];
@@ -510,6 +625,7 @@ function damageSimple(amount) {
     this.remove = true;
     if (!isNaN(this.scoreValue)) { crystalsEarned += this.scoreValue; crystalSpawnTimer = 16; }
     spawnExplosion(this.px, this.py, 0);
+    playSfx('die');
   }
 }
 function damageExplodingProjectile(amount) {
@@ -518,8 +634,10 @@ function damageExplodingProjectile(amount) {
   addEffect(new Puff(this.px, this.py, 4, 255, 0, 255));
   if (this.integrity <= 0 && !this.remove) {
     this.remove = true;
+    playSfx('playerdie');
     crystalsEarned += this.scoreValue; crystalSpawnTimer = 16;
     spawnExplosion(this.px, this.py, 0);
+    playSfx('impact');
     noiseBurst(this.px, this.py, 6);
     var i, a;
     for (i = 0; i < 8; i++) {
@@ -846,6 +964,7 @@ Shy.prototype.step = function () {
         if (p && !p.remove) addEntity(new MonsterBolt(this.px, this.py, jitter(p.px, 8), jitter(p.py, 8)));
         else addEntity(new MonsterBolt(this.px, this.py, randomIn(0, W), randomIn(0, H)));
         previousEnemyProjectileCount++;
+        playSfx('enemyfire');
       }
       sniffForFood(this, 12);
     }
@@ -935,6 +1054,7 @@ Mother.prototype.step = function () {
       if (this.timer > 60 && this.energy > 20 && this.managed.length < starfishBroodLimit &&
           previousEnemyCount < desiredEnemyCount + 5) {
         this.timer = 0;
+        playSfx('starfish');
         for (i = 0; i < 2; i++) {
           var baby = new Hunter(jitter(this.px, 6), jitter(this.py, 6));
           baby.spriteBase = 36;
@@ -1002,6 +1122,7 @@ Eater.prototype.step = function () {
   if (this.target && !this.target.remove &&
       Math.abs(this.target.px - this.px) < 4 && Math.abs(this.target.py - this.py) < 4) {
     this.target.remove = true;
+    playSfx('eating');
     spawnExplosion(this.target.px, this.target.py, 0);
     this.target = null;
   }
@@ -1051,6 +1172,7 @@ Crystal.prototype.step = function () {
   var p = playerCharacter;
   if (p && !p.remove && Math.abs(p.px - this.px) < 8 && Math.abs(p.py - this.py) < 8) {
     this.remove = true;
+    playSfx('crystal');
     increaseScore(1);
     addEffect(new Puff(this.px, this.py, 8, 255, 0, 255));
     clearRegion(this.px, this.py, 8);
@@ -1070,6 +1192,7 @@ Crystal.prototype.step = function () {
 };
 
 function explodeAt(x, y, radius) {
+  playSfx('impact');
   noiseBurst(x, y, Math.max(0, radius));
   clearRegion(x, y, radius);
   spawnExplosion(x, y, 0);
@@ -1285,6 +1408,11 @@ function drawStringWrappedCentered(str, cx, y, wrapWidth, tint) {
   for (i = 0; i < lines.length; i++) drawStringCentered(lines[i], cx, y + i * FONT_LINE, tint);
   return lines.length;
 }
+function drawStringWrappedLeft(str, x, y, wrapWidth, tint) {
+  var lines = wrapLines(str, wrapWidth), i;
+  for (i = 0; i < lines.length; i++) drawString(lines[i], x, y + i * FONT_LINE, tint);
+  return lines.length;
+}
 
 
 var wave = 0, currentSetting = 'attract';
@@ -1408,7 +1536,7 @@ function initializeWorld() {
   effectColor = [[0, 255, 0], [218, 0, 15], [255, 89, 31]];
   applySetting(currentSetting);
 
-  if (currentSetting === 'intermission') {
+  if (currentSetting === 'intermission' || currentSetting === 'ready?') {
     removeAllButCrystals();
     cut = true;
     currentCutsceneImage = WAVE_CUTSCENE_IMAGE[Math.min(WAVE_CUTSCENE_IMAGE.length - 1, wave)];
@@ -1436,7 +1564,10 @@ function initializeWorld() {
 
   if (cut) { transitionTimer = 0; transitionDirection = -1; }
   else { transitionTimer = 0; transitionDirection = 1; }
-
+  if (!attractMode) {
+    if (cut) { playMusic('cut'); playSfx('cutscene'); }
+    else playMusic(levelTrack());
+  }
   setupSpawnList();
 }
 
@@ -1654,6 +1785,7 @@ function updatePlayerInput() {
     b.velocityX = 2.0 * inputX / d;
     b.velocityY = 2.0 * inputY / d;
     addEntity(b);
+    playSfx('bolt');
     addEffect(new Puff(p.px + b.velocityX, p.py + b.velocityY, 8, 255, 0, 255));
   }
 }
@@ -1879,12 +2011,15 @@ var PlayState = {
     game.input.keyboard.addKeyCapture([
       Phaser.Keyboard.UP, Phaser.Keyboard.DOWN, Phaser.Keyboard.LEFT,
       Phaser.Keyboard.RIGHT, Phaser.Keyboard.SPACEBAR]);
+    
+    game.input.keyboard.addKey(Phaser.Keyboard.M).onDown.add(toggleSound);
      
     game.input.maxPointers = 1;
     game.input.onDown.add(touchDown, this);
     game.input.onUp.add(touchUp, this);
     game.input.addMoveCallback(touchMove, this);
 
+    loadSounds();
     loadHighScore();
     fetchLeaderboard();
     beginAttractMode();
@@ -2067,6 +2202,7 @@ var BootState = {
 
     Phaser.Canvas.setImageRenderingCrisp(game.canvas);
     game.time.desiredFps = 60;
+    game.forceSingleUpdate = false;
     resize();
     window.addEventListener('resize', resize);
     window.addEventListener('orientationchange', resize);
@@ -2088,6 +2224,7 @@ function resize() {
 
 window.addEventListener('load', function () {
   game = new Phaser.Game(CW, CH, Phaser.CANVAS, 'game-root', null, false, false);
+  
   game.state.add('Boot', BootState);
   game.state.add('Preload', PreloadState);
   game.state.add('Play', PlayState);

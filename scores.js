@@ -11,6 +11,16 @@ var PROMPT_TOP = 150,
 var PAGE_HOLD = 300,
   SHUTTER = 10;
 
+var BESTIARY_TOP = 20,
+  BESTIARY_BOTTOM = 144;
+var BESTIARY_HOLD = 180;
+var BESTIARY_HEAD = BESTIARY_TOP + 12;
+var BESTIARY_ITEM_TOP = BESTIARY_HEAD + 12;
+var BESTIARY_ROOM = BESTIARY_BOTTOM - 4 - BESTIARY_ITEM_TOP;
+var BESTIARY_TEXT_X = 32,
+  BESTIARY_SPRITE_X = 20,
+  BESTIARY_WRAP = 22;
+
 var CELL_W = 11,
   CELL_H = 13,
   CELL_PITCH = 12;
@@ -34,12 +44,69 @@ var repeatAxis = 0,
   confirmWasDown = false;
 var touchWasActive = false,
   touchMoved = false;
+var axisArmed = false,
+  touchArmed = false;
 var REPEAT_FIRST = 18,
   REPEAT_NEXT = 6;
 
 var attractPage = 0,
   pageTimer = 0,
   wasAttract = false;
+
+function bestiaryItemHeight(item) {
+  return FONT_LINE * (wrapLines(item[2], BESTIARY_WRAP).length + 1) + 4;
+}
+
+function bestiaryPageHeight(items) {
+  var h = 0;
+  for (var i = 0; i < items.length; i++) h += bestiaryItemHeight(items[i]);
+  return h;
+}
+
+// split a list into the fewest equal-sized chunks that each fit the panel, so
+// pages stay balanced instead of one full page followed by a stub.
+function splitBestiaryList(list) {
+  for (var pages = 1; pages <= list.items.length; pages++) {
+    var chunks = [],
+      taken = 0,
+      fits = true,
+      i,
+      size;
+    for (i = 0; i < pages; i++) {
+      size = Math.ceil((list.items.length - taken) / (pages - i));
+      chunks.push(list.items.slice(taken, taken + size));
+      taken += size;
+    }
+    for (i = 0; i < chunks.length; i++) {
+      if (bestiaryPageHeight(chunks[i]) > BESTIARY_ROOM) fits = false;
+    }
+    if (fits) return chunks;
+  }
+  return [list.items];
+}
+
+function buildAttractPages() {
+  var pages = [
+    { kind: "board", top: PANEL_TOP, bottom: PANEL_BOTTOM, hold: PAGE_HOLD },
+    { kind: "title", top: PANEL_TOP, bottom: PANEL_BOTTOM, hold: PAGE_HOLD },
+  ];
+  for (var i = 0; i < ILLUSTRATED_LISTS.length; i++) {
+    var chunks = splitBestiaryList(ILLUSTRATED_LISTS[i]);
+    for (var c = 0; c < chunks.length; c++) {
+      pages.push({
+        kind: "bestiary",
+        title: ILLUSTRATED_LISTS[i].title,
+        items: chunks[c],
+        top: BESTIARY_TOP,
+        bottom: BESTIARY_BOTTOM,
+        hold: BESTIARY_HOLD,
+      });
+    }
+  }
+  return pages;
+}
+
+var ATTRACT_PAGES = buildAttractPages();
 
 var FAKE = [
   { name: "deyji", score: 412 },
@@ -144,6 +211,8 @@ function beginNameEntry() {
   confirmWasDown = true;
   touchWasActive = false;
   touchMoved = false;
+  axisArmed = false;
+  touchArmed = false;
 
   nameEntry = scoreQualifies(score);
   if (!nameEntry) return;
@@ -204,6 +273,10 @@ function updateNameEntry() {
   if (!nameEntry) return false;
 
   var code = entryAxis();
+  if (!axisArmed) {
+    if (code === 0) axisArmed = true;
+    code = 0;
+  }
   if (code === 0) {
     repeatAxis = 0;
     repeatTimer = 0;
@@ -220,7 +293,9 @@ function updateNameEntry() {
   var confirmPressed = confirmDown && !confirmWasDown;
   confirmWasDown = confirmDown;
 
-  if (touch.active) {
+  if (!touchArmed) {
+    if (!touch.active) touchArmed = true;
+  } else if (touch.active) {
     touchWasActive = true;
     if (Math.abs(touch.x) > 0.35 || Math.abs(touch.y) > 0.35) touchMoved = true;
   } else if (touchWasActive) {
@@ -234,7 +309,7 @@ function updateNameEntry() {
 }
 
 window.addEventListener("keydown", function (e) {
-  if (!nameEntry || !e.key) return;
+  if (!nameEntry || !e.key || e.repeat) return;
   if (e.key === "Backspace") {
     e.preventDefault();
     if (entryChars[entryIndex] !== " ") entryChars[entryIndex] = " ";
@@ -292,6 +367,28 @@ function drawTitlePage() {
     drawStringCentered("best " + highScore, W / 2, 104, INK_DIM);
 }
 
+function drawBestiaryPage(page) {
+  drawStringCentered("- " + page.title + " -", W / 2, BESTIARY_HEAD, INK_DIM);
+
+  var anim = Math.floor(clock / 7) % 2;
+  var y =
+    BESTIARY_ITEM_TOP +
+    Math.floor((BESTIARY_ROOM - bestiaryPageHeight(page.items)) / 2);
+  for (var i = 0; i < page.items.length; i++) {
+    var item = page.items[i];
+    blitSprite(item[0] + anim, BESTIARY_SPRITE_X, y + 3);
+    drawString(item[1], BESTIARY_TEXT_X, y, INK);
+    drawStringWrappedLeft(
+      item[2],
+      BESTIARY_TEXT_X,
+      y + FONT_LINE,
+      BESTIARY_WRAP,
+      INK_LIT,
+    );
+    y += bestiaryItemHeight(item);
+  }
+}
+
 function drawAttractPanels() {
   if (!wasAttract) {
     wasAttract = true;
@@ -299,21 +396,30 @@ function drawAttractPanels() {
     pageTimer = 0;
   }
 
+  var page = ATTRACT_PAGES[attractPage];
   pageTimer++;
-  if (pageTimer === PAGE_HOLD + SHUTTER) attractPage ^= 1;
-  if (pageTimer >= PAGE_HOLD + SHUTTER * 2) pageTimer = 0;
 
   var open = 1;
-  if (pageTimer >= PAGE_HOLD + SHUTTER)
-    open = (pageTimer - PAGE_HOLD - SHUTTER) / SHUTTER;
-  else if (pageTimer >= PAGE_HOLD) open = 1 - (pageTimer - PAGE_HOLD) / SHUTTER;
+  if (pageTimer <= SHUTTER) open = pageTimer / SHUTTER;
+  else if (pageTimer > SHUTTER + page.hold)
+    open = 1 - (pageTimer - SHUTTER - page.hold) / SHUTTER;
 
-  var cy = (PANEL_TOP + PANEL_BOTTOM) / 2;
-  var half = Math.floor(((PANEL_BOTTOM - PANEL_TOP) / 2) * open);
+  // the demo world would show through the bestiary art, so park it
+  if (entityGroup) entityGroup.visible = page.kind !== "bestiary";
+  if (explosionGroup) explosionGroup.visible = page.kind !== "bestiary";
+
+  var cy = (page.top + page.bottom) / 2;
+  var half = Math.floor(((page.bottom - page.top) / 2) * open);
   drawWindow(cy - half, cy + half);
   if (open >= 1) {
-    if (attractPage === 0) drawBoardPage();
-    else drawTitlePage();
+    if (page.kind === "board") drawBoardPage();
+    else if (page.kind === "title") drawTitlePage();
+    else drawBestiaryPage(page);
+  }
+
+  if (pageTimer >= SHUTTER * 2 + page.hold) {
+    attractPage = (attractPage + 1) % ATTRACT_PAGES.length;
+    pageTimer = 0;
   }
 
   drawWindow(PROMPT_TOP, PROMPT_BOTTOM);
